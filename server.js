@@ -24,12 +24,17 @@ if (!process.env.SESSION_SECRET) {
   console.warn('WARNING: SESSION_SECRET is not set. Set it in environment variables.');
 }
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'replace-with-a-secure-string',
+  secret: process.env.SESSION_SECRET || 'replace-me-secure',
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    collectionName: 'sessions',
+    ttl: 14 * 24 * 60 * 60 // 14 days
+  }),
   cookie: {
-    secure: true,       // cookies only over HTTPS
-    sameSite: 'none',   // required to allow cookies in iframes
+    secure: true,
+    sameSite: 'none',
     httpOnly: true
   }
 }));
