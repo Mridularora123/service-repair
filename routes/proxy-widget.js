@@ -2,12 +2,16 @@
 const express = require('express');
 const router = express.Router();
 
+const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '');
+
 router.get('/proxy/widget', (req, res) => {
-  // Optional: read the shop header when called through an app proxy
   const shop = (req.get('X-Shopify-Shop-Domain') || '').trim();
 
-  // Return HTML that loads your public/widget.js and mounts into #sr-root
-  // Adjust path to widget.js if different on your app
+  // Fallback: if APP_URL not configured, attempt to derive from incoming host (not ideal)
+  const scriptBase = APP_URL || (req.protocol + '://' + (process.env.HOST || req.get('host')));
+
+  const scriptSrc = scriptBase.replace(/\/+$/,'') + '/public/widget.js';
+
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html>
@@ -32,12 +36,16 @@ router.get('/proxy/widget', (req, res) => {
     new MutationObserver(sendHeight).observe(document.body, { childList:true, subtree:true, attributes:true });
     setInterval(sendHeight, 500);
 
-    // Load your widget script from same origin (when proxied) or app origin
+    // Load widget script from app host (absolute) — avoids 404 from shop origin
     (function(){
-      var scriptSrc = location.origin.replace(/\\/+$/,'') + '/public/widget.js';
+      var scriptSrc = ${JSON.stringify(scriptSrc)};
       if(!document.querySelector('script[src="'+scriptSrc+'"]')) {
         var s = document.createElement('script'); s.src = scriptSrc; s.async = true;
-        s.onload = function(){ if(window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') { try{ window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true }); }catch(e){ console.error(e); } } };
+        s.onload = function(){
+          if(window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
+            try{ window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true }); }catch(e){ console.error(e); }
+          }
+        };
         s.onerror = function(){ console.error('Failed to load widget script:', scriptSrc); document.getElementById('sr-root').innerText = 'Failed to load widget.'; };
         document.head.appendChild(s);
       } else if(window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
