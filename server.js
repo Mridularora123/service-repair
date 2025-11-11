@@ -12,15 +12,16 @@ const MongoStore = require('connect-mongo');
 
 const app = express();
 
-// ---------- Basic security & logging ----------
-// Configure helmet but disable frameguard & contentSecurityPolicy defaults
-// because we'll set a targeted CSP that allows framing by the shop when proxied.
-app.use(helmet({
-  contentSecurityPolicy: false,
-  frameguard: false
-}));
+// ---------- Config & env ----------
+const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '') || null;
+const PORT = process.env.PORT || 5000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/repair-app';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'replace-me-secure';
 
-app.use(cors()); // you may lock this down to allowed origins if needed
+// ---------- Basic security & logging ----------
+// Use helmet but disable frameguard & default CSP (we set CSP per-request below)
+app.use(helmet({ contentSecurityPolicy: false, frameguard: false }));
+app.use(cors()); // consider restricting to known origins in production
 app.use(morgan('tiny'));
 
 // IMPORTANT: trust proxy so secure cookies work behind Render/Heroku proxies
@@ -31,16 +32,16 @@ if (!process.env.SESSION_SECRET) {
   console.warn('WARNING: SESSION_SECRET is not set. Set it in environment variables.');
 }
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'replace-me-secure',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URI,
+    mongoUrl: MONGODB_URI,
     collectionName: 'sessions',
     ttl: 14 * 24 * 60 * 60 // 14 days
   }),
   cookie: {
-    secure: true,        // requires HTTPS
+    secure: true,        // requires HTTPS in production
     sameSite: 'none',    // required for embedded Shopify apps
     httpOnly: true
   }
@@ -49,22 +50,20 @@ app.use(session({
 // ---------- Allow framing for Shopify (per-request CSP) ----------
 // This middleware removes any X-Frame-Options header and sets a targeted CSP
 // when the request comes from Shopify via an App Proxy (X-Shopify-Shop-Domain header).
-// Place this before routes that will be framed (e.g. /proxy/widget).
+// Place this before routes that will be framed (e.g. /proxy/*).
 app.use((req, res, next) => {
   try {
-    // Remove any existing header that could block framing
+    // Remove any header that would block framing
     if (typeof res.removeHeader === 'function') res.removeHeader('X-Frame-Options');
 
-    // If proxied by Shopify, Shopify sends X-Shopify-Shop-Domain header.
-    // Restrict frame-ancestors to that shop (and admin.shopify if needed).
+    // Shopify app proxy sets X-Shopify-Shop-Domain header
     const shop = (req.get('X-Shopify-Shop-Domain') || '').trim();
 
     if (shop) {
-      // allow only the calling shop (and admin) to embed
+      // Allow only the calling shop and Shopify admin to embed
       res.setHeader('Content-Security-Policy', `frame-ancestors https://${shop} https://admin.shopify.com`);
     } else {
       // Development fallback: remove restrictive CSP so iframe can be tested directly.
-      // For production prefer app proxy and the shop-specific header above.
       if (typeof res.removeHeader === 'function') res.removeHeader('Content-Security-Policy');
     }
   } catch (err) {
@@ -74,9 +73,13 @@ app.use((req, res, next) => {
 });
 
 // ---------- Webhooks (must be mounted BEFORE bodyParser.json()) ----------
-// Example: routes/webhooks should export handlers using express.raw()
-// e.g. app.use('/webhooks', require('./routes/webhooks'));
-app.use('/webhooks', require('./routes/webhooks'));
+// routes/webhooks should export handlers using express.raw() to verify HMAC.
+try {
+  app.use('/webhooks', require('./routes/webhooks'));
+} catch (e) {
+  // If you don't have webhooks route yet, warn but continue.
+  console.warn('Warning: ./routes/webhooks not found or failed to load. If you use webhooks, add that file.', e.message || e);
+}
 
 // ---------- Body parsers for the rest of the app ----------
 app.use(bodyParser.json({ limit: '1mb' }));
@@ -86,14 +89,30 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/theme', express.static(path.join(__dirname, 'theme')));
 
-// Mount your APIs (adjust these requires to your actual route filenames)
-app.use('/api', require('./routes/api'));
-app.use('/admin-auth', require('./routes/admin-auth'));
-app.use('/auth', require('./routes/auth')); // OAuth/auth
+// Mount your APIs (adjust requires to your actual route filenames)
+try {
+  app.use('/api', require('./routes/api'));
+} catch (e) {
+  console.warn('Warning: ./routes/api not found or failed to load. Add routes/api if needed.', e.message || e);
+}
+try {
+  app.use('/admin-auth', require('./routes/admin-auth'));
+} catch (e) {
+  // optional route
+}
+try {
+  app.use('/auth', require('./routes/auth')); // OAuth/auth
+} catch (e) {
+  console.warn('Warning: ./routes/auth missing (OAuth).', e.message || e);
+}
 
 // ---------- Mount the proxy-widget route (serves the iframe page) ----------
-const proxyWidget = require('./routes/proxy-widget'); // make sure this file exists
-app.use(proxyWidget); // serves /proxy/widget (used by App Proxy or direct iframe)
+try {
+  const proxyWidget = require('./routes/proxy-widget'); // should handle /proxy and /proxy/*
+  app.use(proxyWidget);
+} catch (e) {
+  console.warn('Warning: ./routes/proxy-widget not found. Create routes/proxy-widget.js to serve the widget HTML.', e.message || e);
+}
 
 // ---------- Minimal pages ----------
 app.get('/', (req, res) => {
@@ -110,6 +129,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/admin', (req, res) => {
+  // adjust path if your admin view is stored elsewhere
   res.sendFile(path.join(__dirname, 'views', 'admin.html'));
 });
 
@@ -118,11 +138,16 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/healthz', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // ---------- MongoDB connection ----------
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/repair-app';
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('MongoDB connected'))
-  .catch(err => { console.error('MongoDB error', err); process.exit(1); });
+  .catch(err => {
+    console.error('MongoDB connection error', err);
+    // If DB is required for your app to run, you might want to exit
+    // process.exit(1);
+  });
 
 // ---------- Start server ----------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
+  if (APP_URL) console.log(`APP_URL set to ${APP_URL}`);
+});
