@@ -1,0 +1,16 @@
+
+# Render YAML manifest for service-repair app.
+services:
+  - type: web
+    name: service-repair
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    repo: https://github.com/YOUR_USERNAME/service-repair
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '5000'
