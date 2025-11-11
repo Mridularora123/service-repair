@@ -1,16 +1,20 @@
-// routes/proxy-widget.js
+// routes/proxy-widget.js (INLINE widget.js approach — fastest)
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const router = express.Router();
-
-const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '');
 
 router.get('/proxy/widget', (req, res) => {
   const shop = (req.get('X-Shopify-Shop-Domain') || '').trim();
 
-  // Fallback: if APP_URL not configured, attempt to derive from incoming host (not ideal)
-  const scriptBase = APP_URL || (req.protocol + '://' + (process.env.HOST || req.get('host')));
-
-  const scriptSrc = scriptBase.replace(/\/+$/,'') + '/public/widget.js';
+  // Read the widget file from disk (public/widget.js) and inline it.
+  let widgetJs = '';
+  try {
+    widgetJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+  } catch (err) {
+    console.error('Could not read public/widget.js for inlining', err);
+    widgetJs = 'console.error("Inline widget not available on server");';
+  }
 
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
@@ -25,33 +29,25 @@ router.get('/proxy/widget', (req, res) => {
   <div id="sr-root" data-shop="${shop}">Loading Service Repair…</div>
 
   <script>
-    // Auto-resize parent iframe by sending height to parent
-    function sendHeight(){
-      try{
-        var h = document.documentElement.scrollHeight || document.body.scrollHeight;
-        parent.postMessage({ type: 'sr_height', height: h }, '*');
-      }catch(e){}
-    }
+    // Auto-resize parent iframe (sends height)
+    function sendHeight(){ try{ var h = document.documentElement.scrollHeight || document.body.scrollHeight; parent.postMessage({ type: 'sr_height', height: h }, '*'); }catch(e){} }
     window.addEventListener('load', sendHeight);
     new MutationObserver(sendHeight).observe(document.body, { childList:true, subtree:true, attributes:true });
     setInterval(sendHeight, 500);
+  </script>
 
-    // Load widget script from app host (absolute) — avoids 404 from shop origin
-    (function(){
-      var scriptSrc = ${JSON.stringify(scriptSrc)};
-      if(!document.querySelector('script[src="'+scriptSrc+'"]')) {
-        var s = document.createElement('script'); s.src = scriptSrc; s.async = true;
-        s.onload = function(){
-          if(window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
-            try{ window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true }); }catch(e){ console.error(e); }
-          }
-        };
-        s.onerror = function(){ console.error('Failed to load widget script:', scriptSrc); document.getElementById('sr-root').innerText = 'Failed to load widget.'; };
-        document.head.appendChild(s);
-      } else if(window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
-        window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true });
-      }
-    })();
+  <!-- INLINED WIDGET JS -->
+  <script>
+  ${widgetJs.replace(/<\/script>/g,'<\\/script>')}
+  // Try to init after inline
+  try {
+    if (window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
+      window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied: true });
+    } else {
+      // if widget auto-inits itself it may already have run
+      console.warn('ServiceRepairWidget.init not found after inlining.');
+    }
+  } catch (e) { console.error(e); }
   </script>
 </body>
 </html>`);
