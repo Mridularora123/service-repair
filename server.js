@@ -87,6 +87,18 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/theme', express.static(path.join(__dirname, 'theme')));
 
+// Temporary stub — remove after you seed real data
+app.get('/api/public/structure', (req, res) => {
+  res.json({
+    ok: true,
+    categories: [
+      { _id: 'test-phone', name: 'Phones', description: 'Phone repair' },
+      { _id: 'test-laptop', name: 'Laptops', description: 'Laptop repair' }
+    ]
+  });
+});
+
+
 // Mount your APIs (adjust requires to your actual route filenames)
 try {
   app.use('/api', require('./routes/api'));
