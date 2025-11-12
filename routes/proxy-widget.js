@@ -1,4 +1,4 @@
-// routes/proxy-widget.js
+// routes/proxy-widget.js — corrected to request the script via the shop-facing /apps/service-repair/* path
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -6,17 +6,23 @@ const router = express.Router();
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
-// Helper: normalize host-provided shop header
+// NOTE: this must match your app proxy subpath configured in Partner Dashboard:
+// App Proxy: subpath prefix = apps, subpath = service-repair
+const APP_PROXY_PREFIX = '/apps/service-repair';
+
+// helper to normalize shop header
 function getShop(req) {
   return (req.get('X-Shopify-Shop-Domain') || '').trim();
 }
 
-// Serve widget HTML (safe to be framed by Shopify)
+// Serve proxied widget HTML (this is requested by Shopify as /proxy/widget)
 router.get(['/', '/widget', '/*'], (req, res) => {
   const shop = getShop(req);
-  // Use a proxied script URL so the browser requests the JS under the shop domain,
-  // which causes Shopify to forward the request to /proxy/widget-script on your app.
-  const scriptSrc = '/proxy/widget-script';
+
+  // IMPORTANT: use the shop-facing app proxy path (so the browser requests
+  // https://<shop-domain>/apps/service-repair/widget-script and Shopify will forward
+  // that to your app at /proxy/widget-script)
+  const shopFacingScriptSrc = (APP_PROXY_PREFIX + '/widget-script');
 
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
@@ -31,7 +37,6 @@ router.get(['/', '/widget', '/*'], (req, res) => {
   <div id="sr-root" data-shop="${shop}">Loading Service Repair…</div>
 
   <script>
-    // send height up to parent iframe for theme resizing
     function sendHeight(){
       try{
         var h = document.documentElement.scrollHeight || document.body.scrollHeight;
@@ -45,7 +50,7 @@ router.get(['/', '/widget', '/*'], (req, res) => {
 
   <script>
     (function(){
-      var scriptSrc = ${JSON.stringify(scriptSrc)};
+      var scriptSrc = ${JSON.stringify(shopFacingScriptSrc)};
       var s = document.createElement('script'); s.src = scriptSrc; s.async = true;
       s.onload = function(){
         try {
@@ -65,21 +70,18 @@ router.get(['/', '/widget', '/*'], (req, res) => {
 </html>`);
 });
 
-// Serve the actual widget JS file (proxied). Shopify will forward shop-domain requests
-// for /proxy/widget-script to your app at /proxy/widget-script, so the browser gets the JS
-// under the shop origin and avoids cross-origin / CSP issues.
+// Serve the actual JS file on your app at /proxy/widget-script
+// Shopify will forward shop requests for /apps/service-repair/widget-script to your app /proxy/widget-script
 router.get('/widget-script', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, 'widget.js');
-  // If file doesn't exist, return 404 so you can see it clearly in logs
   if (!fs.existsSync(filePath)) {
     console.error('widget-script: file not found at', filePath);
     return res.status(404).type('text/plain').send('widget.js not found');
   }
 
-  // Stream the JS file with proper headers
   res.set({
     'Content-Type': 'application/javascript; charset=utf-8',
-    'Cache-Control': 'public, max-age=60' // small cache for speed, safe to change
+    'Cache-Control': 'public, max-age=60'
   });
 
   const stream = fs.createReadStream(filePath);
