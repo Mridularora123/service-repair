@@ -106,14 +106,16 @@ try {
   console.warn('Warning: ./routes/auth missing (OAuth).', e.message || e);
 }
 
-// Mount the proxy-widget route specifically for Shopify App Proxy
+// Mount the proxy-widget route so Shopify proxy requests to /proxy/* are handled
 try {
   const proxyWidget = require('./routes/proxy-widget');
-  // Shopify forwards /apps/service-repair/* → /proxy/service-repair/*
-  app.use('/proxy/service-repair', proxyWidget);
+  // Mount at /proxy so that Shopify's App Proxy (configured as https://service-repair.onrender.com/proxy)
+  // will forward requests like /apps/service-repair/widget => service will call /proxy/widget
+  app.use('/proxy', proxyWidget);
 } catch (e) {
   console.warn('Warning: ./routes/proxy-widget not found.', e.message || e);
 }
+
 
 
 // ---------- Minimal pages ----------

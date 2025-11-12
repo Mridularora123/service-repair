@@ -1,21 +1,23 @@
-// routes/proxy-widget.js — Fixed version
+// routes/proxy-widget.js
 const express = require('express');
 const router = express.Router();
 
 const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '') || null;
 
-// Detect widget request
-function isWidgetPath(req) {
+// helper to decide this is the widget request
+function looksLikeWidget(req) {
   const orig = (req.originalUrl || req.url || '').toLowerCase();
   const pathOnly = orig.split('?')[0];
-  return pathOnly.endsWith('/widget');
+  // accept /proxy/widget  OR /proxy/service-repair/widget  OR .../widget
+  return pathOnly.endsWith('/widget') || pathOnly === '/proxy' || pathOnly === '/proxy/';
 }
 
-// Serve widget HTML when Shopify proxy calls /apps/service-repair/widget
 router.get(['/', '/widget', '/*'], (req, res) => {
-  const shouldServeWidget = isWidgetPath(req) || true;
+  // Always serve widget HTML for calls under /proxy (safe fallback)
   const scriptBase = APP_URL || (req.protocol + '://' + req.get('host'));
   const scriptSrc = (scriptBase.replace(/\/+$/, '') + '/public/widget.js');
+
+  // Shopify provides X-Shopify-Shop-Domain when calling an app proxy
   const shop = (req.get('X-Shopify-Shop-Domain') || '').trim();
 
   res.set('Content-Type', 'text/html; charset=utf-8');
@@ -31,6 +33,7 @@ router.get(['/', '/widget', '/*'], (req, res) => {
   <div id="sr-root" data-shop="${shop}">Loading Service Repair…</div>
 
   <script>
+    // send height up to parent iframe so theme can resize
     function sendHeight(){
       try{
         var h = document.documentElement.scrollHeight || document.body.scrollHeight;
