@@ -98,6 +98,35 @@ app.use('/theme', express.static(path.join(__dirname, 'theme')));
 //   });
 // });
 
+// DB-backed public submit endpoint
+try {
+  const Submission = require('./models/Submission');
+
+  app.post('/api/public/submit', async (req, res) => {
+    try {
+      const { deviceCategory, formData } = req.body || {};
+      // basic validation
+      if (!deviceCategory || !formData) {
+        return res.status(400).json({ ok: false, error: 'bad request: missing deviceCategory or formData' });
+      }
+
+      const doc = await Submission.create({
+        deviceCategory,
+        formData,
+        shop: req.get('X-Shopify-Shop-Domain') || ''
+      });
+
+      return res.json({ ok: true, id: doc._id });
+    } catch (err) {
+      console.error('POST /api/public/submit error', err);
+      return res.status(500).json({ ok: false, error: 'server error' });
+    }
+  });
+} catch (e) {
+  console.warn('Submission route not mounted:', e.message || e);
+}
+
+
 // DB-backed public structure endpoint
 try {
   const Category = require('./models/Category');
