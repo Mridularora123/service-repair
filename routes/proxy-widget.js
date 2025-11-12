@@ -1,28 +1,53 @@
-// routes/proxy-widget.js — corrected to request the script via the shop-facing /apps/service-repair/* path
+// routes/proxy-widget.js — widget-script route registered before catch-all
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const WIDGET_FILE = path.join(PUBLIC_DIR, 'widget.js');
 
-// NOTE: this must match your app proxy subpath configured in Partner Dashboard:
-// App Proxy: subpath prefix = apps, subpath = service-repair
-const APP_PROXY_PREFIX = '/apps/service-repair';
+function loadWidgetJs() {
+  try {
+    if (!fs.existsSync(WIDGET_FILE)) {
+      console.error('proxy-widget: widget.js not found at', WIDGET_FILE);
+      return null;
+    }
+    return fs.readFileSync(WIDGET_FILE, 'utf8');
+  } catch (err) {
+    console.error('proxy-widget: error reading widget.js', err);
+    return null;
+  }
+}
 
-// helper to normalize shop header
 function getShop(req) {
   return (req.get('X-Shopify-Shop-Domain') || '').trim();
 }
 
-// Serve proxied widget HTML (this is requested by Shopify as /proxy/widget)
+// log incoming proxied requests (helpful)
+router.use((req, res, next) => {
+  console.log('[proxy-widget] incoming', req.method, req.originalUrl, 'X-Shopify-Shop-Domain=', req.get('X-Shopify-Shop-Domain'));
+  next();
+});
+
+// ********** Serve the actual JS file FIRST **********
+router.get('/widget-script', (req, res) => {
+  if (!fs.existsSync(WIDGET_FILE)) {
+    console.error('widget-script: file not found at', WIDGET_FILE);
+    return res.status(404).type('text/plain').send('widget.js not found');
+  }
+  res.set({
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'Cache-Control': 'public, max-age=60'
+  });
+  fs.createReadStream(WIDGET_FILE).pipe(res);
+});
+
+// ********** Then handle widget HTML (catch-all) **********
 router.get(['/', '/widget', '/*'], (req, res) => {
   const shop = getShop(req);
-
-  // IMPORTANT: use the shop-facing app proxy path (so the browser requests
-  // https://<shop-domain>/apps/service-repair/widget-script and Shopify will forward
-  // that to your app at /proxy/widget-script)
-  const shopFacingScriptSrc = (APP_PROXY_PREFIX + '/widget-script');
+  const widgetJs = loadWidgetJs();
+  const inlineScript = widgetJs ? `<script>\n${widgetJs}\n</script>` : `<script>/* widget.js not found on server */</script>`;
 
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
@@ -48,48 +73,17 @@ router.get(['/', '/widget', '/*'], (req, res) => {
     setInterval(sendHeight, 500);
   </script>
 
+  ${inlineScript}
+
   <script>
-    (function(){
-      var scriptSrc = ${JSON.stringify(shopFacingScriptSrc)};
-      var s = document.createElement('script'); s.src = scriptSrc; s.async = true;
-      s.onload = function(){
-        try {
-          if (window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
-            window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true });
-          }
-        } catch(e) { console.error(e); }
-      };
-      s.onerror = function(){
-        console.error('Failed to load widget script:', scriptSrc);
-        document.getElementById('sr-root').innerText = 'Failed to load widget.';
-      };
-      document.head.appendChild(s);
-    })();
+    try {
+      if (window.ServiceRepairWidget && typeof window.ServiceRepairWidget.init === 'function') {
+        window.ServiceRepairWidget.init(document.getElementById('sr-root'), { proxied:true });
+      }
+    } catch (e) { console.error('widget auto-init error', e); }
   </script>
 </body>
 </html>`);
-});
-
-// Serve the actual JS file on your app at /proxy/widget-script
-// Shopify will forward shop requests for /apps/service-repair/widget-script to your app /proxy/widget-script
-router.get('/widget-script', (req, res) => {
-  const filePath = path.join(PUBLIC_DIR, 'widget.js');
-  if (!fs.existsSync(filePath)) {
-    console.error('widget-script: file not found at', filePath);
-    return res.status(404).type('text/plain').send('widget.js not found');
-  }
-
-  res.set({
-    'Content-Type': 'application/javascript; charset=utf-8',
-    'Cache-Control': 'public, max-age=60'
-  });
-
-  const stream = fs.createReadStream(filePath);
-  stream.on('error', (err) => {
-    console.error('widget-script stream error', err);
-    if (!res.headersSent) res.status(500).send('error reading widget.js');
-  });
-  stream.pipe(res);
 });
 
 module.exports = router;
