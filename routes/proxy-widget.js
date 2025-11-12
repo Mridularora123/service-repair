@@ -1,38 +1,23 @@
-// routes/proxy-widget.js
+// routes/proxy-widget.js — Fixed version
 const express = require('express');
 const router = express.Router();
 
 const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '') || null;
 
-// Helper: decide whether this proxied request should serve the widget HTML.
-// Shopify may forward different suffixes. We treat any request whose forwarded
-// path ends with "widget" (case-insensitive) as the widget request.
+// Detect widget request
 function isWidgetPath(req) {
-  // req.originalUrl includes the full path (e.g. /proxy/service-repair/widget or /proxy/widget)
   const orig = (req.originalUrl || req.url || '').toLowerCase();
-  // strip query params
   const pathOnly = orig.split('?')[0];
-  return pathOnly.endsWith('/widget') || pathOnly === '/proxy' || pathOnly === '/proxy/';
+  return pathOnly.endsWith('/widget');
 }
 
-router.get(['/proxy', '/proxy/*'], (req, res) => {
-  // Decide whether to return widget HTML or a default message.
-  // For safety, if it's not clearly widget, still serve widget to support store calling /apps/service-repair/widget.
-  const shouldServeWidget = isWidgetPath(req) || (req.get('X-Shopify-Shop-Domain') && req.path.toLowerCase().includes('widget'));
-
-  if (!shouldServeWidget) {
-    // Optional: return a simple index or 404; keep simple for now.
-    return res.status(404).send('Not found');
-  }
-
-  // Determine script base (use APP_URL env if set; fallback to host of current request)
+// Serve widget HTML when Shopify proxy calls /apps/service-repair/widget
+router.get(['/', '/widget', '/*'], (req, res) => {
+  const shouldServeWidget = isWidgetPath(req) || true;
   const scriptBase = APP_URL || (req.protocol + '://' + req.get('host'));
-  const scriptSrc = (scriptBase.replace(/\/+$/,'') + '/public/widget.js');
-
-  // Shop header (when proxied by Shopify)
+  const scriptSrc = (scriptBase.replace(/\/+$/, '') + '/public/widget.js');
   const shop = (req.get('X-Shopify-Shop-Domain') || '').trim();
 
-  // Set content type and send widget HTML
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html>
@@ -46,7 +31,6 @@ router.get(['/proxy', '/proxy/*'], (req, res) => {
   <div id="sr-root" data-shop="${shop}">Loading Service Repair…</div>
 
   <script>
-    // Auto-resize parent iframe by sending height to parent
     function sendHeight(){
       try{
         var h = document.documentElement.scrollHeight || document.body.scrollHeight;

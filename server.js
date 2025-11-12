@@ -106,13 +106,15 @@ try {
   console.warn('Warning: ./routes/auth missing (OAuth).', e.message || e);
 }
 
-// ---------- Mount the proxy-widget route (serves the iframe page) ----------
+// Mount the proxy-widget route specifically for Shopify App Proxy
 try {
-  const proxyWidget = require('./routes/proxy-widget'); // should handle /proxy and /proxy/*
-  app.use(proxyWidget);
+  const proxyWidget = require('./routes/proxy-widget');
+  // Shopify forwards /apps/service-repair/* → /proxy/service-repair/*
+  app.use('/proxy/service-repair', proxyWidget);
 } catch (e) {
-  console.warn('Warning: ./routes/proxy-widget not found. Create routes/proxy-widget.js to serve the widget HTML.', e.message || e);
+  console.warn('Warning: ./routes/proxy-widget not found.', e.message || e);
 }
+
 
 // ---------- Minimal pages ----------
 app.get('/', (req, res) => {
