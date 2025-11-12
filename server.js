@@ -83,6 +83,9 @@ try {
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+
+app.use('/api/public', require('./routes/public'));
+
 // ---------- Static files & API routes ----------
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/theme', express.static(path.join(__dirname, 'theme')));
@@ -190,6 +193,8 @@ app.get('/admin', (req, res) => {
   // adjust path if your admin view is stored elsewhere
   res.sendFile(path.join(__dirname, 'views', 'admin.html'));
 });
+
+app.use('/admin', require('./routes/admin-debug'));
 
 // ---------- Health endpoints ----------
 app.get('/health', (req, res) => res.json({ ok: true }));
