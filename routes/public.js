@@ -1,11 +1,12 @@
-// routes/public.js — temporary stub
+// routes/public.js — temporary submit stub (no DB)
 const express = require('express');
 const router = express.Router();
 
-// accept any body and return success so UI can continue
+// Accept any body and return success so frontend can continue testing.
+// Keep this temporary — we'll replace with DB-backed code when you're ready.
 router.post('/submit', (req, res) => {
-  // optional debug log (comment out if noisy):
-  // console.log('submit stub', { body: req.body, headers: req.headers });
+  // Optional: uncomment to log incoming data in server logs
+  // console.log('submit stub received:', { body: req.body, headers: req.headers });
   return res.json({ ok: true, message: 'stub received (no DB)', received: !!req.body });
 });
 
