@@ -41,7 +41,7 @@ app.use(session({
     ttl: 14 * 24 * 60 * 60 // 14 days
   }),
   cookie: {
-    secure: true,        // requires HTTPS in production
+    secure: true,        // requires HTTPS in production (Render provides HTTPS)
     sameSite: 'none',    // required for embedded Shopify apps
     httpOnly: true
   }
@@ -73,11 +73,9 @@ app.use((req, res, next) => {
 });
 
 // ---------- Webhooks (must be mounted BEFORE bodyParser.json()) ----------
-// routes/webhooks should export handlers using express.raw() to verify HMAC.
 try {
   app.use('/webhooks', require('./routes/webhooks'));
 } catch (e) {
-  // If you don't have webhooks route yet, warn but continue.
   console.warn('Warning: ./routes/webhooks not found or failed to load. If you use webhooks, add that file.', e.message || e);
 }
 
@@ -106,17 +104,16 @@ try {
   console.warn('Warning: ./routes/auth missing (OAuth).', e.message || e);
 }
 
-// Mount the proxy-widget route so Shopify proxy requests to /proxy/* are handled
+// ---------- Mount the proxy-widget route so Shopify proxy requests to /proxy/* are handled ----------
 try {
   const proxyWidget = require('./routes/proxy-widget');
   // Mount at /proxy so that Shopify's App Proxy (configured as https://service-repair.onrender.com/proxy)
   // will forward requests like /apps/service-repair/widget => service will call /proxy/widget
   app.use('/proxy', proxyWidget);
+  console.log('Mounted proxy-widget router at /proxy');
 } catch (e) {
   console.warn('Warning: ./routes/proxy-widget not found.', e.message || e);
 }
-
-
 
 // ---------- Minimal pages ----------
 app.get('/', (req, res) => {
@@ -146,7 +143,7 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
   .then(() => console.log('MongoDB connected'))
   .catch(err => {
     console.error('MongoDB connection error', err);
-    // If DB is required for your app to run, you might want to exit
+    // If DB is required for your app to run, you might want to exit:
     // process.exit(1);
   });
 
