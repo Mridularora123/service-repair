@@ -88,16 +88,32 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/theme', express.static(path.join(__dirname, 'theme')));
 
 // Temporary stub — remove after you seed real data
-app.get('/api/public/structure', (req, res) => {
-  res.json({
-    ok: true,
-    categories: [
-      { _id: 'test-phone', name: 'Phones', description: 'Phone repair' },
-      { _id: 'test-laptop', name: 'Laptops', description: 'Laptop repair' }
-    ]
-  });
-});
+// app.get('/api/public/structure', (req, res) => {
+//   res.json({
+//     ok: true,
+//     categories: [
+//       { _id: 'test-phone', name: 'Phones', description: 'Phone repair' },
+//       { _id: 'test-laptop', name: 'Laptops', description: 'Laptop repair' }
+//     ]
+//   });
+// });
 
+// DB-backed public structure endpoint
+try {
+  const Category = require('./models/Category');
+
+  app.get('/api/public/structure', async (req, res) => {
+    try {
+      const categories = await Category.find({}).sort({ createdAt: -1 }).lean().limit(100);
+      return res.json({ ok: true, categories });
+    } catch (err) {
+      console.error('GET /api/public/structure error', err);
+      return res.status(500).json({ ok: false, error: 'server error' });
+    }
+  });
+} catch (e) {
+  console.warn('Category route not mounted:', e.message || e);
+}
 
 // Mount your APIs (adjust requires to your actual route filenames)
 try {
