@@ -1,8 +1,9 @@
-// public/widget.js — Service Repair Widget (updated)
-// Sends top-level name/email/problem (so server validation passes)
-// Also keeps nested formData for full raw data.
+// public/widget.js — Service Repair Widget (FINAL STABLE VERSION)
+// Includes SAFE iframe auto-height system — NO infinite growth
+
 (function() {
-  // Force your Render app base URL when embedded through Shopify proxy
+
+  // Force Render base when served via Shopify proxy
   window.__SERVICE_REPAIR_APP_BASE = "https://service-repair.onrender.com";
 
   const APP_BASE = (function() {
@@ -27,18 +28,16 @@
     return e;
   }
 
-  // try to determine shop domain (Shopify preview / storefront)
   function detectShopDomain() {
-    // Shopify exposes window.Shopify in most storefronts; fallback to location.host
     try {
       if (window.Shopify && window.Shopify.shop) return window.Shopify.shop;
-      if (window.Shopify && window.Shopify.locale && window.Shopify.locale.shop) return window.Shopify.locale.shop;
-    } catch (e) {}
+    } catch (_) {}
     return location.hostname || '';
   }
 
   async function initEl(root) {
     root.innerHTML = 'Loading…';
+
     let data;
     try {
       data = await fetchStructure();
@@ -50,6 +49,7 @@
 
     const cat = (data.categories && data.categories[0]) || null;
     const container = document.createElement('div');
+
     if (!cat) {
       container.innerHTML = '<div>No categories</div>';
       root.innerHTML = '';
@@ -84,29 +84,19 @@
       const msg = form.querySelector('.sr-msg');
       msg.textContent = 'Sending…';
 
-      // top-level fields (server expects these for validation)
       const name = (form.name.value || '').trim();
       const email = (form.email.value || '').trim();
       const problem = (form.problem.value || '').trim();
       const deviceSku = (form.deviceSku.value || '').trim();
 
-      // Build payload with both top-level required fields and nested formData
       const payload = {
-        // server-side validation checks for name/email/problem/phone at top-level
-        name: name,
-        email: email,
-        problem: problem,
-        // helpful metadata
-        deviceSku: deviceSku,
+        name,
+        email,
+        problem,
+        deviceSku,
         deviceCategory: cat._id || '',
         shop: detectShopDomain(),
-        // preserve full form data for later inspection
-        formData: {
-          full_name: name,
-          email: email,
-          problem: problem,
-          deviceSku: deviceSku
-        }
+        formData: { full_name: name, email, problem, deviceSku }
       };
 
       try {
@@ -114,24 +104,19 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            // include shop header so backend can pick it up from header if needed
             'X-Shopify-Shop-Domain': detectShopDomain()
           },
           body: JSON.stringify(payload)
         });
 
-        // if server sends non-json (rare), handle safely
         let j;
-        try { j = await res.json(); } catch (err) { j = null; }
+        try { j = await res.json(); } catch (_) { j = null; }
 
         if (res.ok && j && j.ok) {
           msg.textContent = 'Submitted — thank you!';
           form.reset();
         } else {
-          // if server returned structured error, show it; otherwise show generic
-          const serverMsg = j && (j.error || j.message) ? (j.error || j.message) : ('HTTP ' + res.status);
-          msg.textContent = 'Submission failed: ' + serverMsg;
-          console.error('Submit error:', res.status, j);
+          msg.textContent = 'Submission failed: ' + ((j && (j.error || j.message)) || ('HTTP ' + res.status));
         }
       } catch (err) {
         msg.textContent = 'Network error';
@@ -145,35 +130,62 @@
   }
 
   function init(mount) {
-    if (!mount) return;
-    if (mount.dataset.srInitialized) return;
+    if (!mount || mount.dataset.srInitialized) return;
     mount.dataset.srInitialized = '1';
     initEl(mount);
   }
 
   document.addEventListener('DOMContentLoaded', () => {
     ['#sr-root', '#repair-config-root', '.repair-config-root'].forEach(sel => {
-      document.querySelectorAll(sel).forEach(node => {
-        try {
-          init(node);
-        } catch (e) {
-          console.error('Init error', e);
-        }
-      });
+      document.querySelectorAll(sel).forEach(node => init(node));
     });
   });
 
   window.ServiceRepairWidget = window.ServiceRepairWidget || {};
-  window.ServiceRepairWidget.init = function(m, opts) {
-    if (!m) return;
-    if (typeof m === 'string') m = document.querySelector(m);
-    init(m);
-  };
+  window.ServiceRepairWidget.init = init;
 
-  // small helper to avoid XSS when inserting simple strings
   function escapeHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, function(m) {
-      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
-    });
+    return String(s || '').replace(/[&<>"']/g, m =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]
+    );
   }
+
+  
+  // --------------------------------------------------------------
+  //  ⭐ FINAL — STABLE AUTO-RESIZE SYSTEM (NO MORE LOOPS)
+  // --------------------------------------------------------------
+  let lastHeight = 0;
+  let resizeTimer = null;
+
+  function sendHeightSafe() {
+    const h =
+      document.documentElement.scrollHeight ||
+      document.body.scrollHeight ||
+      0;
+
+    if (Math.abs(h - lastHeight) < 5) return; // ignore tiny changes
+    lastHeight = h;
+
+    parent.postMessage({ type: 'sr_height', height: h }, '*');
+  }
+
+  // send when content changes
+  const mo = new MutationObserver(() => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(sendHeightSafe, 80);
+  });
+  mo.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+  // send after load
+  window.addEventListener('load', () => {
+    sendHeightSafe();
+    setTimeout(sendHeightSafe, 200);
+    setTimeout(sendHeightSafe, 800);
+  });
+
+  // images loading
+  Array.from(document.images).forEach(img => {
+    if (!img.complete) img.addEventListener('load', sendHeightSafe);
+  });
+
 })();
